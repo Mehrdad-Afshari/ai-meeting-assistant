@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.db
+*.sqlite3
+
+# Uploaded media / generated data
+backend/data/uploads/*
+backend/data/transcripts/*
+!backend/data/uploads/.gitkeep
+!backend/data/transcripts/.gitkeep
+
+# Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
