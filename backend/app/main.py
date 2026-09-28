@@ -5,9 +5,11 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.services.transcription import transcribe_audio
+
 app = FastAPI(
     title="AI Meeting & Lecture Assistant API",
-    version="0.1.0",
+    version="0.2.0",
     description="Local-first API for transcription and AI-assisted meeting analysis.",
 )
 
@@ -35,6 +37,22 @@ class UploadResponse(BaseModel):
     meeting_id: str
     filename: str
     message: str
+
+
+class TranscriptSegment(BaseModel):
+    start: float
+    end: float
+    text: str
+
+
+class TranscriptionResponse(BaseModel):
+    meeting_id: str
+    text: str
+    language: str
+    language_probability: float
+    duration: float
+    model: str
+    segments: list[TranscriptSegment]
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -65,5 +83,20 @@ async def upload_meeting(file: UploadFile = File(...)) -> UploadResponse:
     return UploadResponse(
         meeting_id=meeting_id,
         filename=original_name,
-        message="Upload successful. Transcription will be added in the next step.",
+        message="Upload successful. Use the transcription endpoint with this meeting ID.",
     )
+
+
+@app.post("/meetings/{meeting_id}/transcribe", response_model=TranscriptionResponse)
+def transcribe_meeting(meeting_id: str, language: str | None = None) -> TranscriptionResponse:
+    matches = list(UPLOAD_DIR.glob(f"{meeting_id}.*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Meeting recording not found.")
+
+    media_path = matches[0]
+    try:
+        result = transcribe_audio(media_path, language=language)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
+
+    return TranscriptionResponse(meeting_id=meeting_id, **result)
