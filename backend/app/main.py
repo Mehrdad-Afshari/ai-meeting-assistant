@@ -5,11 +5,12 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.services.analysis import analyze_transcript
 from app.services.transcription import transcribe_audio
 
 app = FastAPI(
     title="AI Meeting & Lecture Assistant API",
-    version="0.2.0",
+    version="0.3.0",
     description="Local-first API for transcription and AI-assisted meeting analysis.",
 )
 
@@ -23,7 +24,9 @@ app.add_middleware(
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
+TRANSCRIPT_DIR = BASE_DIR / "data" / "transcripts"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".mp4", ".webm", ".ogg"}
 
@@ -53,6 +56,20 @@ class TranscriptionResponse(BaseModel):
     duration: float
     model: str
     segments: list[TranscriptSegment]
+
+
+class ActionItem(BaseModel):
+    task: str
+    owner: str | None = None
+    deadline: str | None = None
+
+
+class AnalysisResponse(BaseModel):
+    meeting_id: str
+    title: str
+    summary: str
+    key_points: list[str]
+    action_items: list[ActionItem]
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -96,7 +113,22 @@ def transcribe_meeting(meeting_id: str, language: str | None = None) -> Transcri
     media_path = matches[0]
     try:
         result = transcribe_audio(media_path, language=language)
+        (TRANSCRIPT_DIR / f"{meeting_id}.txt").write_text(result["text"], encoding="utf-8")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
 
     return TranscriptionResponse(meeting_id=meeting_id, **result)
+
+
+@app.post("/meetings/{meeting_id}/analyze", response_model=AnalysisResponse)
+def analyze_meeting(meeting_id: str) -> AnalysisResponse:
+    transcript_path = TRANSCRIPT_DIR / f"{meeting_id}.txt"
+    if not transcript_path.exists():
+        raise HTTPException(status_code=404, detail="Transcript not found. Transcribe the meeting first.")
+
+    transcript = transcript_path.read_text(encoding="utf-8")
+    try:
+        result = analyze_transcript(transcript)
+        return AnalysisResponse(meeting_id=meeting_id, **result)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Local AI analysis failed: {exc}") from exc
