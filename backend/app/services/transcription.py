@@ -3,17 +3,19 @@ from pathlib import Path
 
 from faster_whisper import WhisperModel
 
+# "small" remains a good quality/speed compromise for multilingual meetings.
 MODEL_SIZE = "small"
 
 
 @lru_cache(maxsize=1)
 def get_whisper_model() -> WhisperModel:
-    """Load Whisper once and reuse it across requests.
-
-    int8 CPU inference keeps the MVP usable on machines without an NVIDIA GPU.
-    The model is downloaded automatically on first use.
-    """
+    """Load Whisper once per backend process and reuse it across requests."""
     return WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
+
+
+def warmup_whisper() -> None:
+    """Initialize the model without running transcription."""
+    get_whisper_model()
 
 
 def transcribe_audio(file_path: Path, language: str | None = None) -> dict:
@@ -21,8 +23,13 @@ def transcribe_audio(file_path: Path, language: str | None = None) -> dict:
     segments, info = model.transcribe(
         str(file_path),
         language=language,
-        beam_size=5,
+        # Greedy decoding is substantially faster than beam_size=5 on CPU and
+        # is sufficient for the interactive local-first MVP.
+        beam_size=1,
+        best_of=1,
+        temperature=0.0,
         vad_filter=True,
+        condition_on_previous_text=False,
     )
 
     transcript_segments = []
