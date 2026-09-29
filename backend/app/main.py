@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -12,7 +13,7 @@ from app.services.transcription import transcribe_audio
 
 app = FastAPI(
     title="AI Meeting & Lecture Assistant API",
-    version="0.4.0",
+    version="0.4.1",
     description="Local-first API for transcription, structured analysis, history, and transcript Q&A.",
 )
 
@@ -59,6 +60,7 @@ class TranscriptionResponse(BaseModel):
     duration: float
     model: str
     segments: list[TranscriptSegment]
+    processing_seconds: float
 
 
 class ActionItem(BaseModel):
@@ -73,6 +75,7 @@ class AnalysisResponse(BaseModel):
     summary: str
     key_points: list[str]
     action_items: list[ActionItem]
+    processing_seconds: float
 
 
 class QuestionRequest(BaseModel):
@@ -125,13 +128,16 @@ def transcribe_meeting(meeting_id: str, language: str | None = None) -> Transcri
     matches = list(UPLOAD_DIR.glob(f"{meeting_id}.*"))
     if not matches:
         raise HTTPException(status_code=404, detail="Meeting recording not found.")
+    started = perf_counter()
     try:
         result = transcribe_audio(matches[0], language=language)
         (TRANSCRIPT_DIR / f"{meeting_id}.txt").write_text(result["text"], encoding="utf-8")
         save_transcript(meeting_id, result["text"], result["language"], result["duration"])
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
-    return TranscriptionResponse(meeting_id=meeting_id, **result)
+    elapsed = round(perf_counter() - started, 2)
+    print(f"[timing] transcription {meeting_id}: {elapsed}s")
+    return TranscriptionResponse(meeting_id=meeting_id, processing_seconds=elapsed, **result)
 
 
 @app.post("/meetings/{meeting_id}/analyze", response_model=AnalysisResponse)
@@ -144,13 +150,16 @@ def analyze_meeting(meeting_id: str) -> AnalysisResponse:
             transcript = transcript_path.read_text(encoding="utf-8")
     if not transcript:
         raise HTTPException(status_code=404, detail="Transcript not found. Transcribe the meeting first.")
+    started = perf_counter()
     try:
         result = analyze_transcript(transcript)
         if meeting is not None:
             save_analysis(meeting_id, result)
-        return AnalysisResponse(meeting_id=meeting_id, **result)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Local AI analysis failed: {exc}") from exc
+    elapsed = round(perf_counter() - started, 2)
+    print(f"[timing] analysis {meeting_id}: {elapsed}s")
+    return AnalysisResponse(meeting_id=meeting_id, processing_seconds=elapsed, **result)
 
 
 @app.post("/meetings/{meeting_id}/ask", response_model=AnswerResponse)
